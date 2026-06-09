@@ -6,7 +6,7 @@ use crate::icons::Icon;
 use crate::state::AppState;
 
 static TILES: &[(&str, &str, &str)] = &[
-    ("calendar", "Foglalások", "Görgethető heti naptár. Jelölj ki szabad napokat és kérj foglalást — két engedélyező hagyja jóvá."),
+    ("calendar", "Foglalások", "Görgethető heti naptár. Jelölj ki szabad napokat és kérj foglalást — minden engedélyezőnek jóvá kell hagynia."),
     ("tasks", "Feladatok", "Csoportosított teendők alfeladatokkal, ismétlődéssel. Egyes feladatok nyitott foglalássá válhatnak."),
     ("chat", "Beszélgetések", "Nyiss témát bármiről. A foglalások és feladatok eseményei automatikusan ide kerülnek."),
     ("bell", "Értesítések", "E-mail és push értesítés a fontos eseményekről. A profilodban szabhatod testre."),
@@ -14,7 +14,7 @@ static TILES: &[(&str, &str, &str)] = &[
 
 static RULES: &[(&str, &str)] = &[
     ("Foglalás = napok.", "Kezdő és záró időpont nincs, csak teljes napok. Egy hétvége jellemzően péntektől vasárnapig tart."),
-    ("Két jóváhagyás kell.", "Egy foglalás akkor elfogadott, ha minden engedélyező (Anna és Béla) jóváhagyta. Bárki elutasíthatja, indoklással."),
+    ("Minden engedélyező jóváhagyása kell.", "Egy foglalás akkor elfogadott, ha minden engedélyező jóváhagyta. Bármelyikük elutasíthatja, indoklással."),
     ("Zárt vs. nyitott.", "Zárt foglalásnál csak a foglaló kezeli a résztvevőket. Nyitott foglaláshoz bárki csatlakozhat."),
     ("Hagyd tisztán.", "Távozás előtt: szemét kivihető, hűtő kiürítve, redőnyök leengedve, gázcsap elzárva."),
     ("Stég és csónak.", "A mentőmellény kötelező a gyerekeknek. A csónakkulcs a bejárati szekrény felső fiókjában."),
@@ -75,7 +75,11 @@ pub fn InfoTool() -> Element {
                     div { style: "flex: 1; min-width: 180px;",
                         h4 { style: "margin-bottom: 6px;", "Cím és megközelítés" }
                         p { style: "font-size: 14px; color: var(--ink-2);", "8638 Balatonlelle, Nád utca 7." }
-                        button { class: "bg-btn ghost sm", style: "margin-top: 12px;",
+                        a {
+                            class: "bg-btn ghost sm",
+                            style: "margin-top: 12px; text-decoration: none;",
+                            href: "https://maps.google.com/?q=8638+Balatonlelle,+N%C3%A1d+utca+7.",
+                            target: "_blank",
                             Icon { name: "map", size: 15.0 }
                             " Térkép megnyitása"
                         }

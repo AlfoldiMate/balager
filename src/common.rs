@@ -2,39 +2,38 @@
 
 use dioxus::prelude::*;
 
-use crate::data::{initials, status_icon, status_label, user};
+use crate::models::{status_icon, status_label, UserDto};
 use crate::icons::Icon;
 
 #[component]
 pub fn Avatar(
-    id: String,
+    user: UserDto,
     #[props(default)] size: String,
     #[props(default = true)] ring: bool,
 ) -> Element {
-    let u = user(&id);
     let shadow = if ring { "" } else { "box-shadow: none;" };
     rsx! {
         div {
             class: "bg-av {size}",
-            style: "background: {u.color}; {shadow}",
-            title: "{u.name}",
-            "{initials(u.name)}"
+            style: "background: {user.color}; {shadow}",
+            title: "{user.name}",
+            "{user.initials()}"
         }
     }
 }
 
 #[component]
 pub fn AvatarStack(
-    ids: Vec<String>,
+    users: Vec<UserDto>,
     #[props(default = "sm".to_string())] size: String,
     #[props(default = 4)] max: usize,
 ) -> Element {
-    let shown: Vec<String> = ids.iter().take(max).cloned().collect();
-    let extra = ids.len().saturating_sub(shown.len());
+    let shown: Vec<UserDto> = users.iter().take(max).cloned().collect();
+    let extra = users.len().saturating_sub(shown.len());
     rsx! {
         div { class: "bg-avstack",
-            for id in shown {
-                Avatar { key: "{id}", id: "{id}", size: "{size}" }
+            for u in shown {
+                Avatar { key: "{u.id}", user: u.clone(), size: "{size}" }
             }
             if extra > 0 {
                 div { class: "bg-av {size}", style: "background: #cdddd5; color: #4a655f;", "+{extra}" }
@@ -62,6 +61,19 @@ pub fn Switch(on: bool, onclick: EventHandler<MouseEvent>) -> Element {
             aria_checked: "{on}",
             onclick: move |e| onclick.call(e),
             span { class: "knob" }
+        }
+    }
+}
+
+/// Inline error banner for panels and forms.
+#[component]
+pub fn ErrorNote(message: String) -> Element {
+    if message.is_empty() {
+        return rsx! {};
+    }
+    rsx! {
+        div { style: "padding: 10px 13px; border-radius: 10px; background: var(--st-reject-bg); border: 1px solid var(--st-reject-bd); color: var(--st-reject-ink); font-size: 13px;",
+            "{message}"
         }
     }
 }

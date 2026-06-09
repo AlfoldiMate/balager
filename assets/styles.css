@@ -145,6 +145,7 @@ html, body { height: 100%; margin: 0; padding: 0; background: var(--bg); }
   display: flex; align-items: center; gap: 16px;
   background: rgba(255,255,255,.82); backdrop-filter: blur(10px);
   border-bottom: 1px solid var(--line);
+  position: relative; z-index: 40;
 }
 .bg-top .title-wrap { min-width: 0; flex-shrink: 0; }
 .bg-top h1 { font-size: 19px; line-height: 1.15; }

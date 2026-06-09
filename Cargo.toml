@@ -4,7 +4,32 @@ version = "0.1.0"
 edition = "2021"
 
 [dependencies]
-dioxus = { version = "0.7.3", features = ["web"] }
+dioxus = { version = "0.7.3", features = ["fullstack"] }
+serde = { version = "1", features = ["derive"] }
+chrono = { version = "0.4", features = ["serde", "wasmbind"] }
+
+# server-only
+tokio = { version = "1", features = ["rt-multi-thread", "macros"], optional = true }
+sqlx = { version = "0.8", default-features = false, features = ["sqlite", "runtime-tokio", "macros", "migrate"], optional = true }
+argon2 = { version = "0.5", optional = true }
+rand = { version = "0.8", optional = true }
+http = { version = "1", optional = true }
+lettre = { version = "0.11", default-features = false, features = ["smtp-transport", "tokio1-rustls-tls", "builder", "hostname", "pool"], optional = true }
+tracing = { version = "0.1", optional = true }
+
+[features]
+default = []
+web = ["dioxus/web"]
+server = [
+    "dioxus/server",
+    "dep:tokio",
+    "dep:sqlx",
+    "dep:argon2",
+    "dep:rand",
+    "dep:http",
+    "dep:lettre",
+    "dep:tracing",
+]
 
 [profile.release]
 opt-level = "z"

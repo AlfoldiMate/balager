@@ -3,28 +3,27 @@
 use dioxus::prelude::*;
 
 use crate::common::{Avatar, BalatonMark, WaterWaves};
-use crate::data::{user, ME};
 use crate::discussions::{DiscHeaderLeft, DiscHeaderRight, DiscussionsTool};
 use crate::icons::Icon;
 use crate::info::InfoTool;
+use crate::models::UserDto;
 use crate::notifications::NotificationsPopover;
 use crate::reservations::{ReservationsTool, ResHeaderLeft, ResHeaderRight};
 use crate::settings::SettingsView;
-use crate::state::use_app_state;
+use crate::state::{use_app_state, AppState};
 use crate::tasks::{TasksHeaderLeft, TasksHeaderRight, TasksTool};
 
 struct Tool {
     id: &'static str,
     label: &'static str,
     icon: &'static str,
-    badge: Option<u32>,
 }
 
 static TOOLS: &[Tool] = &[
-    Tool { id: "foglalasok", label: "Foglalások", icon: "calendar", badge: Some(2) },
-    Tool { id: "feladatok", label: "Feladatok", icon: "tasks", badge: Some(9) },
-    Tool { id: "beszelgetesek", label: "Beszélgetések", icon: "chat", badge: Some(3) },
-    Tool { id: "informacio", label: "Információ", icon: "info", badge: None },
+    Tool { id: "foglalasok", label: "Foglalások", icon: "calendar" },
+    Tool { id: "feladatok", label: "Feladatok", icon: "tasks" },
+    Tool { id: "beszelgetesek", label: "Beszélgetések", icon: "chat" },
+    Tool { id: "informacio", label: "Információ", icon: "info" },
 ];
 
 fn tool_title(id: &str) -> &'static str {
@@ -40,7 +39,7 @@ fn tool_title(id: &str) -> &'static str {
 
 fn tool_sub(id: &str) -> &'static str {
     match id {
-        "foglalasok" => "Heti naptár · Balatonlelle",
+        "foglalasok" => "Heti naptár · Balaton",
         "feladatok" => "Közös teendők",
         "beszelgetesek" => "Családi témák",
         "informacio" => "Tudnivalók és házirend",
@@ -49,12 +48,34 @@ fn tool_sub(id: &str) -> &'static str {
     }
 }
 
+/// Live badge per tool: pending reservations / my open tasks.
+fn badge_of(state: &AppState, tool_id: &str) -> Option<usize> {
+    let n = match tool_id {
+        "foglalasok" => state
+            .reservations_list()
+            .iter()
+            .filter(|r| r.status == "pending")
+            .count(),
+        "feladatok" => {
+            let me = state.me().id;
+            state
+                .groups_list()
+                .iter()
+                .flat_map(|g| g.tasks.iter())
+                .filter(|t| !t.done && t.assignee == Some(me))
+                .count()
+        }
+        _ => 0,
+    };
+    (n > 0).then_some(n)
+}
+
 #[component]
 fn Sidebar() -> Element {
-    let state = use_context::<crate::state::AppState>();
+    let state = use_context::<AppState>();
     let open = (state.sidebar_open)();
     let active = (state.active)();
-    let me = user(ME);
+    let me = state.me();
     rsx! {
         nav { class: if open { "bg-side open" } else { "bg-side" },
             WaterWaves { height: 230.0 }
@@ -67,22 +88,27 @@ fn Sidebar() -> Element {
             }
             div { class: "bg-nav",
                 for t in TOOLS {
-                    button {
-                        key: "{t.id}",
-                        class: if active == t.id { "bg-navitem active" } else { "bg-navitem" },
-                        title: "{t.label}",
-                        onclick: move |_| state.set_active_tool(t.id),
-                        Icon { name: "{t.icon}", size: 21.0, stroke: 2.0 }
-                        if open {
-                            span { class: "lbl", "{t.label}" }
-                        }
-                        if open {
-                            if let Some(b) = t.badge {
-                                span { class: "badge-dot", "{b}" }
-                            }
-                        } else {
-                            if t.badge.is_some() {
-                                span { class: "nav-dot" }
+                    {
+                        let badge = badge_of(&state, t.id);
+                        rsx! {
+                            button {
+                                key: "{t.id}",
+                                class: if active == t.id { "bg-navitem active" } else { "bg-navitem" },
+                                title: "{t.label}",
+                                onclick: move |_| state.set_active_tool(t.id),
+                                Icon { name: "{t.icon}", size: 21.0, stroke: 2.0 }
+                                if open {
+                                    span { class: "lbl", "{t.label}" }
+                                }
+                                if open {
+                                    if let Some(b) = badge {
+                                        span { class: "badge-dot", "{b}" }
+                                    }
+                                } else {
+                                    if badge.is_some() {
+                                        span { class: "nav-dot" }
+                                    }
+                                }
                             }
                         }
                     }
@@ -106,11 +132,13 @@ fn Sidebar() -> Element {
                     class: if active == "beallitasok" { "side-user active" } else { "side-user" },
                     title: "Beállítások",
                     onclick: move |_| state.open_settings(),
-                    Avatar { id: "{ME}", size: "sm", ring: false }
+                    Avatar { user: me.clone(), size: "sm", ring: false }
                     if open {
                         div { style: "min-width: 0; text-align: left;",
                             div { style: "font-weight: 700; font-size: 13.5px; line-height: 1.1;", "{me.name}" }
-                            div { style: "font-size: 11px; color: rgba(255,255,255,.65);", "Családtag" }
+                            div { style: "font-size: 11px; color: rgba(255,255,255,.65);",
+                                if me.approver { "Engedélyező" } else { "Családtag" }
+                            }
                         }
                     }
                 }
@@ -121,7 +149,7 @@ fn Sidebar() -> Element {
 
 #[component]
 fn ActiveTool() -> Element {
-    let state = use_context::<crate::state::AppState>();
+    let state = use_context::<AppState>();
     match (state.active)() {
         "foglalasok" => rsx! { ReservationsTool {} },
         "feladatok" => rsx! { TasksTool {} },
@@ -132,8 +160,8 @@ fn ActiveTool() -> Element {
 }
 
 #[component]
-pub fn Balager() -> Element {
-    let state = use_app_state();
+pub fn Balager(user: UserDto) -> Element {
+    let state = use_app_state(user);
 
     // Track the viewport so the layout switches between desktop and mobile.
     use_future(move || async move {
@@ -152,6 +180,8 @@ pub fn Balager() -> Element {
 
     let active = (state.active)();
     let notif = (state.notif_open)();
+    let unread = state.notifs_list().iter().filter(|n| n.unread).count();
+    let me = state.me();
 
     if (state.is_mobile)() {
         return rsx! {
@@ -169,13 +199,15 @@ pub fn Balager() -> Element {
                             n.set(true);
                         },
                         Icon { name: "bell", size: 19.0 }
-                        span { class: "dot" }
+                        if unread > 0 {
+                            span { class: "dot" }
+                        }
                     }
                     button {
                         class: "mbtn",
                         style: "padding: 0; overflow: hidden;",
                         onclick: move |_| state.open_settings(),
-                        Avatar { id: "{ME}", ring: false }
+                        Avatar { user: me.clone(), ring: false }
                     }
                 }
                 div { class: "bg-body", ActiveTool {} }
@@ -241,7 +273,9 @@ pub fn Balager() -> Element {
                             n.set(!v);
                         },
                         Icon { name: "bell", size: 19.0 }
-                        span { class: "dot" }
+                        if unread > 0 {
+                            span { class: "dot" }
+                        }
                     }
                 }
                 div { class: "bg-body", ActiveTool {} }

@@ -23,3 +23,6 @@
 # Local verification artifacts
 .playwright-mcp/
 shot-*.png
+
+# Local database
+balager.db*

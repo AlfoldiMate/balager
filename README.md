@@ -69,17 +69,44 @@ todos for our weekend house at Lake Balaton.
 
 ## Technology
 
-- Rust full-stack application
-- Database
-- Dioxus framework
-- Tailwind CSS
-- Planned deployment on Vercel
-- Login via email and password
-- Long-lived ("remember me") authentication
+- Rust full-stack application: Dioxus 0.7 fullstack (WASM client + axum server)
+- SQLite database (sqlx); file lives next to the binary (`DATABASE_URL`, default `sqlite:balager.db`)
+- Login via email and password (argon2), 180-day session cookie
 - Desktop and mobile design, minimal PWA support (for iOS)
-- Email notifications about important events
+- Email notifications via SMTP (optional, see below)
+- Styling: the design prototype's CSS ported 1:1 (`assets/styles.css`); Tailwind can be layered in later
+
+See `docs/PLAN.md` for the architecture and domain rules.
+
+## Development
+
+```sh
+dx serve            # fullstack dev server (client + server)
+```
+
+On first run the database is created and seeded with one approver account:
+**admin@balager.hu / balaton26** (override via `BALAGER_ADMIN_EMAIL` /
+`BALAGER_ADMIN_PASSWORD`). Log in with it, change the password in Beállítások,
+and create the family's accounts there (users cannot register themselves).
+
+### Email notifications (optional)
+
+Set these env vars to enable notification emails; without them emails are
+skipped silently and only in-app notifications are produced:
+
+```
+SMTP_HOST, SMTP_PORT (default 587), SMTP_USERNAME, SMTP_PASSWORD,
+SMTP_FROM (e.g. "Balager <balager@example.hu>"), APP_BASE_URL
+```
+
+### Deployment
+
+`dx bundle --platform web` produces a self-contained server binary + assets.
+Vercel does not host long-running Rust servers — deploy to Fly.io, a VPS, or a
+home server instead; back up the SQLite file.
 
 ## Design reference
 
-- `Balager.html` — design source:
+- Local handoff bundle: `design/design-handoff/` (authoritative)
+- Original design source:
   https://api.anthropic.com/v1/design/h/NJk_OEr_w5fOevRnqc_8Pg?open_file=Balager.html

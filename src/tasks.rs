@@ -2,15 +2,25 @@
 
 use dioxus::prelude::*;
 
-use crate::common::Avatar;
-use crate::data::{self, hu_date, user, SubTask, Task, TaskGroup as TaskGroupData, ME, TASK_GROUPS};
+use crate::api;
+use crate::common::{Avatar, ErrorNote};
 use crate::icons::Icon;
+use crate::login::clean_err;
+use crate::models::{hu_date, recurring_label, SubTaskDto, TaskDto, TaskInput, RECURRING_OPTIONS};
 use crate::state::{AppState, TaskPanel};
 
 #[component]
 pub fn TasksHeaderLeft() -> Element {
     let state = use_context::<AppState>();
-    let any_open = state.task_open.read().values().any(|v| *v);
+    let mut group_open = use_signal(|| false);
+    let mut group_name = use_signal(String::new);
+    let any_open = {
+        let open_map = state.task_open.read();
+        state
+            .groups_list()
+            .iter()
+            .any(|g| open_map.get(&g.id).copied().unwrap_or(true))
+    };
     rsx! {
         button {
             class: "bg-btn",
@@ -22,16 +32,60 @@ pub fn TasksHeaderLeft() -> Element {
             },
             Icon { name: "plus", size: 18.0 }
         }
-        button { class: "bg-btn ghost", title: "Új csoport", style: "width: 44px; padding: 0; justify-content: center;",
-            Icon { name: "folder", size: 17.0 }
+        div { class: "ds-menuwrap",
+            button {
+                class: "bg-btn ghost",
+                title: "Új csoport",
+                style: "width: 44px; padding: 0; justify-content: center;",
+                onclick: move |_| {
+                    let v = group_open();
+                    group_open.set(!v);
+                },
+                Icon { name: "folder", size: 17.0 }
+            }
+            if group_open() {
+                div { class: "ds-menu-scrim", onclick: move |_| group_open.set(false) }
+                div { class: "ds-menu", style: "min-width: 250px; left: 0; right: auto;",
+                    div { style: "display: flex; gap: 8px; padding: 4px;",
+                        input {
+                            class: "bg-input",
+                            placeholder: "Csoport neve…",
+                            value: "{group_name}",
+                            oninput: move |e| group_name.set(e.value()),
+                        }
+                        button {
+                            class: "bg-btn sm",
+                            onclick: move |_| {
+                                let name = group_name();
+                                if name.trim().is_empty() {
+                                    return;
+                                }
+                                group_open.set(false);
+                                group_name.set(String::new());
+                                let mut state = state;
+                                spawn(async move {
+                                    if api::tasks::create_group(name).await.is_ok() {
+                                        state.groups.restart();
+                                    }
+                                });
+                            },
+                            Icon { name: "check", size: 14.0 }
+                        }
+                    }
+                }
+            }
         }
         button {
             class: "bg-iconbtn",
             title: if any_open { "Összes csoport összecsukása" } else { "Összes csoport kinyitása" },
             onclick: move |_| {
+                let groups = state.groups_list();
                 let mut open = state.task_open;
-                let target = !open.read().values().any(|v| *v);
-                open.set(TASK_GROUPS.iter().map(|g| (g.id, target)).collect());
+                let target = {
+                    let map = open.read();
+                    !groups.iter().any(|g| map.get(&g.id).copied().unwrap_or(true))
+                };
+                open.set(groups.iter().map(|g| (g.id, target)).collect());
             },
             Icon { name: if any_open { "collapseall" } else { "expandall" }, size: 18.0, stroke: 2.0 }
         }
@@ -42,8 +96,12 @@ pub fn TasksHeaderLeft() -> Element {
 pub fn TasksHeaderRight() -> Element {
     let state = use_context::<AppState>();
     let filter = (state.task_filter)();
-    let total: usize = TASK_GROUPS.iter().map(|g| g.tasks.len()).sum();
-    let open: usize = TASK_GROUPS.iter().map(|g| g.tasks.iter().filter(|t| !t.done).count()).sum();
+    let groups = state.groups_list();
+    let total: usize = groups.iter().map(|g| g.tasks.len()).sum();
+    let open: usize = groups
+        .iter()
+        .map(|g| g.tasks.iter().filter(|t| !t.done).count())
+        .sum();
     rsx! {
         div { class: "hdr-tabs",
             button {
@@ -78,18 +136,24 @@ pub fn TasksHeaderRight() -> Element {
 }
 
 #[component]
-fn SubRow(sub: &'static SubTask) -> Element {
-    let mut done = use_signal(|| sub.done);
-    let is_done = done();
+fn SubRow(sub: SubTaskDto) -> Element {
+    let state = use_context::<AppState>();
+    let sub_id = sub.id;
+    let done = sub.done;
     rsx! {
-        div { class: if is_done { "tk-subrow done" } else { "tk-subrow" },
+        div { class: if done { "tk-subrow done" } else { "tk-subrow" },
             button {
-                class: if is_done { "tk-check done" } else { "tk-check" },
-                onclick: move |_| {
-                    let v = done();
-                    done.set(!v);
+                class: if done { "tk-check done" } else { "tk-check" },
+                onclick: move |e| {
+                    e.stop_propagation();
+                    let mut state = state;
+                    spawn(async move {
+                        if api::tasks::set_subtask_done(sub_id, !done).await.is_ok() {
+                            state.groups.restart();
+                        }
+                    });
                 },
-                if is_done {
+                if done {
                     Icon { name: "checkmini", size: 11.0, stroke: 2.6 }
                 }
             }
@@ -99,28 +163,49 @@ fn SubRow(sub: &'static SubTask) -> Element {
 }
 
 #[component]
-fn TaskMenu(onclose: EventHandler<()>) -> Element {
+fn TaskMenu(task: TaskDto, onclose: EventHandler<()>) -> Element {
+    let state = use_context::<AppState>();
+    let task_id = task.id;
+    let done = task.done;
     rsx! {
         div { class: "ds-menu-scrim", onclick: move |_| onclose.call(()) }
         div { class: "ds-menu", onclick: move |e| e.stop_propagation(),
-            button { class: "ds-menu-item", onclick: move |_| onclose.call(()),
+            button {
+                class: "ds-menu-item",
+                onclick: move |_| {
+                    onclose.call(());
+                    let mut state = state;
+                    spawn(async move {
+                        if api::tasks::set_task_done(task_id, !done).await.is_ok() {
+                            state.groups.restart();
+                        }
+                    });
+                },
                 Icon { name: "check", size: 16.0 }
-                " Késznek jelöl"
+                if done { " Újranyitás" } else { " Késznek jelöl" }
             }
-            button { class: "ds-menu-item", onclick: move |_| onclose.call(()),
-                Icon { name: "users", size: 16.0 }
-                " Áthelyezés máshoz"
-            }
-            button { class: "ds-menu-item", onclick: move |_| onclose.call(()),
-                Icon { name: "repeat", size: 16.0 }
-                " Ismétlődés beállítása"
-            }
-            button { class: "ds-menu-item", onclick: move |_| onclose.call(()),
-                Icon { name: "folder", size: 16.0 }
-                " Áthelyezés csoportba"
+            button {
+                class: "ds-menu-item",
+                onclick: move |_| {
+                    onclose.call(());
+                    let mut p = state.task_panel;
+                    p.set(Some(TaskPanel::Edit(task_id)));
+                },
+                Icon { name: "settings", size: 16.0 }
+                " Szerkesztés"
             }
             div { class: "ds-menu-sep" }
-            button { class: "ds-menu-item danger", onclick: move |_| onclose.call(()),
+            button {
+                class: "ds-menu-item danger",
+                onclick: move |_| {
+                    onclose.call(());
+                    let mut state = state;
+                    spawn(async move {
+                        if api::tasks::delete_task(task_id).await.is_ok() {
+                            state.groups.restart();
+                        }
+                    });
+                },
                 Icon { name: "x", size: 16.0 }
                 " Törlés"
             }
@@ -129,16 +214,17 @@ fn TaskMenu(onclose: EventHandler<()>) -> Element {
 }
 
 #[component]
-fn TaskItem(task: &'static Task) -> Element {
+fn TaskItem(task: TaskDto) -> Element {
     let state = use_context::<AppState>();
-    let mut done = use_signal(|| task.done);
     let mut open = use_signal(|| false);
     let mut menu = use_signal(|| false);
-    let is_done = done();
+    let task_id = task.id;
+    let is_done = task.done;
     let is_open = open();
     let sub_done = task.subs.iter().filter(|s| s.done).count();
     let has_subs = !task.subs.is_empty();
-    let assignee = user(task.assignee);
+    let assignee = task.assignee.map(|id| state.user(id));
+    let menu_task = task.clone();
 
     rsx! {
         div { class: if is_done { "tk-item done" } else { "tk-item" },
@@ -146,14 +232,19 @@ fn TaskItem(task: &'static Task) -> Element {
                 class: "tk-row tk-clickable",
                 onclick: move |_| {
                     let mut p = state.task_panel;
-                    p.set(Some(TaskPanel::Edit(task)));
+                    p.set(Some(TaskPanel::Edit(task_id)));
                 },
                 button {
                     class: if is_done { "tk-check done" } else { "tk-check" },
                     onclick: move |e| {
                         e.stop_propagation();
-                        let v = done();
-                        done.set(!v);
+                        let mut state = state;
+                        spawn(async move {
+                            if api::tasks::set_task_done(task_id, !is_done).await.is_ok() {
+                                state.groups.restart();
+                                state.threads.restart();
+                            }
+                        });
                     },
                     if is_done {
                         Icon { name: "check", size: 14.0, stroke: 2.6 }
@@ -162,22 +253,24 @@ fn TaskItem(task: &'static Task) -> Element {
                 div { class: "tk-main",
                     div { class: "tk-title",
                         span { class: "txt", "{task.title}" }
-                        if !task.recurring.is_empty() {
+                        if let Some(rec) = &task.recurring {
                             span { class: "bg-chip reed", style: "height: 22px;",
                                 Icon { name: "repeat", size: 13.0 }
-                                " {task.recurring}"
+                                " {recurring_label(rec)}"
                             }
                         }
                     }
                     div { class: "tk-meta",
-                        span { class: "m",
-                            Avatar { id: "{task.assignee}", size: "sm" }
-                            " {assignee.name}"
+                        if let Some(u) = assignee {
+                            span { class: "m",
+                                Avatar { user: u.clone(), size: "sm" }
+                                " {u.name}"
+                            }
                         }
-                        if !task.due.is_empty() {
+                        if let Some(due) = &task.due {
                             span { class: "m",
                                 Icon { name: "clock" }
-                                " {hu_date(task.due)}"
+                                " {hu_date(due)}"
                             }
                         }
                         if has_subs {
@@ -202,7 +295,7 @@ fn TaskItem(task: &'static Task) -> Element {
                             class: "m tk-discuss",
                             onclick: move |e| {
                                 e.stop_propagation();
-                                state.go_discuss(task.id);
+                                state.go_discuss("task", task_id);
                             },
                             Icon { name: "chat" }
                             " Beszélgetés"
@@ -235,13 +328,13 @@ fn TaskItem(task: &'static Task) -> Element {
                         Icon { name: "dots", size: 17.0 }
                     }
                     if menu() {
-                        TaskMenu { onclose: move |_| menu.set(false) }
+                        TaskMenu { task: menu_task.clone(), onclose: move |_| menu.set(false) }
                     }
                 }
             }
             if has_subs && is_open {
                 div { class: "tk-sub",
-                    for s in task.subs {
+                    for s in task.subs.clone() {
                         SubRow { key: "{s.id}", sub: s }
                     }
                 }
@@ -251,22 +344,21 @@ fn TaskItem(task: &'static Task) -> Element {
 }
 
 #[component]
-fn TaskGroup(group: &'static TaskGroupData, tasks: Vec<&'static Task>, open: bool) -> Element {
+fn TaskGroupView(group_id: i64, name: String, tasks: Vec<TaskDto>, all_count: usize, open_count: usize, open: bool) -> Element {
     let state = use_context::<AppState>();
-    let open_count = group.tasks.iter().filter(|t| !t.done).count();
     rsx! {
         div { class: if open { "tk-group" } else { "tk-group closed" },
             button {
                 class: "tk-ghead",
                 onclick: move |_| {
                     let mut m = state.task_open;
-                    let v = m.read().get(group.id).copied().unwrap_or(true);
-                    m.write().insert(group.id, !v);
+                    let v = m.read().get(&group_id).copied().unwrap_or(true);
+                    m.write().insert(group_id, !v);
                 },
                 Icon { name: "chevdown", size: 16.0, stroke: 2.2, class: "gchev" }
                 Icon { name: "folder", size: 17.0, stroke: 2.0, style: "color: var(--water);" }
-                span { class: "gname", "{group.name}" }
-                span { class: "gcount", "{open_count}/{group.tasks.len()}" }
+                span { class: "gname", "{name}" }
+                span { class: "gcount", "{open_count}/{all_count}" }
                 span { class: "gline" }
             }
             if open {
@@ -284,24 +376,83 @@ fn TaskGroup(group: &'static TaskGroupData, tasks: Vec<&'static Task>, open: boo
 fn TaskEditorPanel(panel: TaskPanel) -> Element {
     let state = use_context::<AppState>();
     let device_mobile = (state.is_mobile)();
-    let task: Option<&'static Task> = match panel {
+    let groups = state.groups_list();
+    let task: Option<TaskDto> = match &panel {
         TaskPanel::New => None,
-        TaskPanel::Edit(t) => Some(t),
+        TaskPanel::Edit(id) => groups
+            .iter()
+            .flat_map(|g| g.tasks.iter())
+            .find(|t| t.id == *id)
+            .cloned(),
     };
     let is_new = task.is_none();
-    let done = task.map(|t| t.done).unwrap_or(false);
-    let mut recur = use_signal(|| task.map(|t| t.recurring).unwrap_or(""));
-    let group = task.and_then(|t| {
-        TASK_GROUPS.iter().find(|g| g.tasks.iter().any(|x| x.id == t.id))
+    let task_id = task.as_ref().map(|t| t.id);
+    let me_id = state.me().id;
+
+    let mut title = use_signal(|| task.as_ref().map(|t| t.title.clone()).unwrap_or_default());
+    let mut group_id = use_signal(|| {
+        task.as_ref()
+            .map(|t| t.group_id)
+            .or_else(|| groups.first().map(|g| g.id))
+            .unwrap_or(0)
     });
-    let group_name = group.map(|g| g.name).unwrap_or("Új feladat");
-    let assignee = task.map(|t| t.assignee).unwrap_or(ME);
-    let title = task.map(|t| t.title).unwrap_or("");
-    let due = task.map(|t| t.due).unwrap_or("");
-    let close = move |_| {
+    let mut assignee = use_signal(|| task.as_ref().and_then(|t| t.assignee).or(Some(me_id)));
+    let mut due = use_signal(|| task.as_ref().and_then(|t| t.due.clone()).unwrap_or_default());
+    let mut recurring = use_signal(|| {
+        task.as_ref()
+            .and_then(|t| t.recurring.clone())
+            .unwrap_or_default()
+    });
+    let mut new_sub = use_signal(String::new);
+    let mut event_from = use_signal(String::new);
+    let mut event_to = use_signal(String::new);
+    let mut error = use_signal(String::new);
+    let mut busy = use_signal(|| false);
+
+    let close = move |_: MouseEvent| {
         let mut p = state.task_panel;
         p.set(None);
     };
+
+    let save = move |_: MouseEvent| {
+        if busy() {
+            return;
+        }
+        busy.set(true);
+        error.set(String::new());
+        let input = TaskInput {
+            group_id: group_id(),
+            title: title(),
+            due: Some(due()).filter(|d| !d.is_empty()),
+            assignee: assignee(),
+            recurring: Some(recurring()).filter(|r| !r.is_empty()),
+        };
+        let mut state = state;
+        spawn(async move {
+            let result = match task_id {
+                Some(id) => api::tasks::update_task(id, input).await,
+                None => api::tasks::create_task(input).await.map(|_| ()),
+            };
+            match result {
+                Ok(()) => {
+                    state.groups.restart();
+                    let mut p = state.task_panel;
+                    p.set(None);
+                }
+                Err(e) => error.set(clean_err(&e.to_string())),
+            }
+            busy.set(false);
+        });
+    };
+
+    let done = task.as_ref().map(|t| t.done).unwrap_or(false);
+    let group_name = groups
+        .iter()
+        .find(|g| g.id == group_id())
+        .map(|g| g.name.clone())
+        .unwrap_or_else(|| "Új feladat".into());
+    let users = state.users_list();
+    let rec = recurring();
 
     rsx! {
         aside { class: "bg-panel",
@@ -329,61 +480,115 @@ fn TaskEditorPanel(panel: TaskPanel) -> Element {
                 }
             }
             div { class: "pbody",
+                ErrorNote { message: error() }
                 div { class: "bg-field",
                     label { "Megnevezés" }
-                    input { class: "bg-input", initial_value: "{title}", placeholder: "Mi a teendő?" }
+                    input {
+                        class: "bg-input",
+                        placeholder: "Mi a teendő?",
+                        value: "{title}",
+                        oninput: move |e| title.set(e.value()),
+                    }
+                }
+                div { class: "bg-field",
+                    label { "Csoport" }
+                    select {
+                        class: "bg-input",
+                        value: "{group_id}",
+                        onchange: move |e| {
+                            if let Ok(id) = e.value().parse() {
+                                group_id.set(id);
+                            }
+                        },
+                        for g in groups.iter() {
+                            option { value: "{g.id}", selected: g.id == group_id(), "{g.name}" }
+                        }
+                    }
                 }
                 div { class: "set-pwgrid",
                     div { class: "bg-field",
                         label { "Felelős" }
-                        div { class: "bg-input", style: "display: flex; align-items: center; gap: 9px;",
-                            Avatar { id: "{assignee}", size: "sm" }
-                            " {user(assignee).name}"
-                            Icon { name: "chevdown", size: 15.0, style: "margin-left: auto; color: var(--ink-3);" }
+                        select {
+                            class: "bg-input",
+                            onchange: move |e| {
+                                assignee.set(e.value().parse::<i64>().ok().filter(|id| *id > 0));
+                            },
+                            option { value: "0", selected: assignee().is_none(), "Nincs" }
+                            for u in users.iter() {
+                                option { value: "{u.id}", selected: assignee() == Some(u.id), "{u.name}" }
+                            }
                         }
                     }
                     div { class: "bg-field",
                         label { "Határidő" }
-                        div { class: "bg-input", style: "display: flex; align-items: center; gap: 9px;",
-                            Icon { name: "clock", size: 15.0, style: "color: var(--ink-3);" }
-                            if due.is_empty() { "Nincs" } else { "{hu_date(due)}" }
+                        input {
+                            class: "bg-input",
+                            r#type: "date",
+                            value: "{due}",
+                            oninput: move |e| due.set(e.value()),
                         }
                     }
                 }
                 div { class: "bg-field",
                     label { "Ismétlődés" }
                     div { class: "bg-seg",
-                        for r in ["", "Hetente", "Kéthetente", "Havonta"] {
+                        button {
+                            class: if rec.is_empty() { "on" } else { "" },
+                            onclick: move |_| recurring.set(String::new()),
+                            "Egyszeri"
+                        }
+                        for (key, label) in RECURRING_OPTIONS.iter().take(3) {
                             button {
-                                key: "{r}",
-                                class: if recur() == r { "on" } else { "" },
-                                onclick: move |_| recur.set(r),
-                                if r.is_empty() { "Egyszeri" } else { "{r}" }
+                                key: "{key}",
+                                class: if rec == *key { "on" } else { "" },
+                                onclick: move |_| recurring.set(key.to_string()),
+                                "{label}"
                             }
                         }
                     }
                 }
-                if let Some(t) = task {
-                    if !t.subs.is_empty() {
-                        div { class: "bg-field",
-                            label { "Alfeladatok · {t.subs.iter().filter(|s| s.done).count()}/{t.subs.len()}" }
-                            div { class: "tk-paneledit-subs",
-                                for s in t.subs {
-                                    SubRow { key: "{s.id}", sub: s }
-                                }
+                if let Some(t) = task.clone() {
+                    div { class: "bg-field",
+                        label { "Alfeladatok · {t.subs.iter().filter(|s| s.done).count()}/{t.subs.len()}" }
+                        div {
+                            for s in t.subs.clone() {
+                                SubRow { key: "{s.id}", sub: s }
                             }
-                            button { class: "bg-btn ghost sm", style: "margin-top: 9px;",
+                        }
+                        div { style: "display: flex; gap: 8px; margin-top: 9px;",
+                            input {
+                                class: "bg-input",
+                                placeholder: "Új alfeladat…",
+                                value: "{new_sub}",
+                                oninput: move |e| new_sub.set(e.value()),
+                            }
+                            button {
+                                class: "bg-btn ghost sm",
+                                style: "height: 40px;",
+                                onclick: move |_| {
+                                    let sub_title = new_sub();
+                                    if sub_title.trim().is_empty() {
+                                        return;
+                                    }
+                                    new_sub.set(String::new());
+                                    let mut state = state;
+                                    let tid = t.id;
+                                    spawn(async move {
+                                        if api::tasks::add_subtask(tid, sub_title).await.is_ok() {
+                                            state.groups.restart();
+                                        }
+                                    });
+                                },
                                 Icon { name: "plus", size: 14.0 }
-                                " Alfeladat"
                             }
                         }
                     }
-                    if let Some(ev) = &t.event {
-                        {
-                            let res_id = ev.res_id;
-                            rsx! {
-                                div { class: "bg-field",
-                                    label { "Kapcsolt esemény" }
+                    if let Some(ev) = t.event.clone() {
+                        div { class: "bg-field",
+                            label { "Kapcsolt esemény" }
+                            {
+                                let res_id = ev.res_id;
+                                rsx! {
                                     button {
                                         class: "tk-event",
                                         style: "margin: 0; width: 100%;",
@@ -397,22 +602,70 @@ fn TaskEditorPanel(panel: TaskPanel) -> Element {
                                 }
                             }
                         }
+                    } else {
+                        div { class: "bg-field",
+                            label { "Esemény kapcsolása" }
+                            p { style: "font-size: 12.5px; color: var(--ink-3); margin-bottom: 8px;",
+                                "Nyitott foglalást hoz létre a feladathoz a megadott napokra."
+                            }
+                            div { class: "set-pwgrid",
+                                input {
+                                    class: "bg-input",
+                                    r#type: "date",
+                                    value: "{event_from}",
+                                    oninput: move |e| event_from.set(e.value()),
+                                }
+                                input {
+                                    class: "bg-input",
+                                    r#type: "date",
+                                    value: "{event_to}",
+                                    oninput: move |e| event_to.set(e.value()),
+                                }
+                            }
+                            button {
+                                class: "bg-btn ghost sm",
+                                style: "margin-top: 9px;",
+                                onclick: move |_| {
+                                    let from = event_from();
+                                    let to = event_to();
+                                    if from.is_empty() || to.is_empty() {
+                                        error.set("Add meg az esemény napjait.".into());
+                                        return;
+                                    }
+                                    let mut state = state;
+                                    let tid = t.id;
+                                    spawn(async move {
+                                        match api::tasks::attach_event(tid, from, to).await {
+                                            Ok(_) => {
+                                                state.groups.restart();
+                                                state.reservations.restart();
+                                            }
+                                            Err(e) => error.set(clean_err(&e.to_string())),
+                                        }
+                                    });
+                                },
+                                Icon { name: "calendar", size: 14.0 }
+                                " Esemény létrehozása"
+                            }
+                        }
                     }
                 }
             }
             div { class: "pfoot",
-                button {
-                    class: "bg-btn ghost",
-                    style: "flex: 1; justify-content: center;",
-                    onclick: move |_| {
-                        if let Some(t) = task {
-                            state.go_discuss(t.id);
-                        }
-                    },
-                    Icon { name: "chat", size: 16.0 }
-                    " Beszélgetés"
+                if let Some(id) = task_id {
+                    button {
+                        class: "bg-btn ghost",
+                        style: "flex: 1; justify-content: center;",
+                        onclick: move |_| state.go_discuss("task", id),
+                        Icon { name: "chat", size: 16.0 }
+                        " Beszélgetés"
+                    }
                 }
-                button { class: "bg-btn", style: "flex: 1; justify-content: center;", onclick: close,
+                button {
+                    class: "bg-btn",
+                    style: "flex: 1; justify-content: center;",
+                    disabled: busy(),
+                    onclick: save,
                     Icon { name: "check", size: 16.0 }
                     " Mentés"
                 }
@@ -426,17 +679,26 @@ pub fn TasksTool() -> Element {
     let state = use_context::<AppState>();
     let device_mobile = (state.is_mobile)();
     let filter = (state.task_filter)();
+    let groups = state.groups_list();
     let open_map = state.task_open.read().clone();
 
-    let match_filter = |t: &Task| match filter {
+    let match_filter = |t: &TaskDto| match filter {
         "active" => !t.done,
         "done" => t.done,
         _ => true,
     };
-    let groups: Vec<(&'static data::TaskGroup, Vec<&'static Task>)> = TASK_GROUPS
+    let shown: Vec<(i64, String, Vec<TaskDto>, usize, usize)> = groups
         .iter()
-        .map(|g| (g, g.tasks.iter().filter(|t| match_filter(t)).collect::<Vec<_>>()))
-        .filter(|(_, ts)| !ts.is_empty())
+        .map(|g| {
+            (
+                g.id,
+                g.name.clone(),
+                g.tasks.iter().filter(|t| match_filter(t)).cloned().collect::<Vec<_>>(),
+                g.tasks.len(),
+                g.tasks.iter().filter(|t| !t.done).count(),
+            )
+        })
+        .filter(|(_, _, tasks, _, _)| !tasks.is_empty())
         .collect();
 
     rsx! {
@@ -449,18 +711,25 @@ pub fn TasksTool() -> Element {
                     }
                 }
                 div { class: "tk-groups",
-                    if groups.is_empty() {
+                    if shown.is_empty() {
                         div { class: "tk-empty",
                             Icon { name: "check", size: 26.0, stroke: 2.0 }
-                            " Nincs ilyen feladat."
+                            if groups.is_empty() {
+                                " Még nincs feladat — hozz létre egy csoportot és egy feladatot."
+                            } else {
+                                " Nincs ilyen feladat."
+                            }
                         }
                     } else {
-                        for (g, tasks) in groups {
-                            TaskGroup {
-                                key: "{g.id}",
-                                group: g,
+                        for (gid, name, tasks, all_count, open_count) in shown {
+                            TaskGroupView {
+                                key: "{gid}",
+                                group_id: gid,
+                                name,
                                 tasks,
-                                open: open_map.get(g.id).copied().unwrap_or(true),
+                                all_count,
+                                open_count,
+                                open: open_map.get(&gid).copied().unwrap_or(true),
                             }
                         }
                     }

@@ -19,3 +19,7 @@
 # Editor / OS
 .DS_Store
 *.log
+
+# Local verification artifacts
+.playwright-mcp/
+shot-*.png

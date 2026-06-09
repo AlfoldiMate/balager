@@ -1,0 +1,10 @@
+{
+  "name": "Balager",
+  "short_name": "Balager",
+  "description": "Családi nyaraló-kezelő a Balatonra — foglalások, feladatok, beszélgetések",
+  "lang": "hu",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#eaf3ef",
+  "theme_color": "#28547a"
+}

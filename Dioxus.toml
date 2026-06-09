@@ -1,0 +1,5 @@
+[application]
+name = "balager"
+
+[web.app]
+title = "Balager — Balatoni nyaraló-kezelő"

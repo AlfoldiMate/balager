@@ -26,3 +26,7 @@ shot-*.png
 
 # Local database
 balager.db*
+
+# Vercel
+/public/
+/shell/

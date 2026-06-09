@@ -1,13 +1,12 @@
-//! Database pool, migrations and first-run seeding.
+//! Database pool (PostgreSQL), migrations and first-run seeding.
 
-use sqlx::sqlite::{SqliteConnectOptions, SqlitePoolOptions};
-use sqlx::SqlitePool;
-use std::str::FromStr;
+use sqlx::postgres::PgPoolOptions;
+use sqlx::PgPool;
 use std::sync::OnceLock;
 
-static POOL: OnceLock<SqlitePool> = OnceLock::new();
+static POOL: OnceLock<PgPool> = OnceLock::new();
 
-pub fn db() -> &'static SqlitePool {
+pub fn db() -> &'static PgPool {
     POOL.get().expect("database not initialised")
 }
 
@@ -16,13 +15,14 @@ pub fn now() -> i64 {
 }
 
 pub async fn init() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
-    let url = std::env::var("DATABASE_URL").unwrap_or_else(|_| "sqlite:balager.db".to_string());
-    let options = SqliteConnectOptions::from_str(&url)?
-        .create_if_missing(true)
-        .foreign_keys(true);
-    let pool = SqlitePoolOptions::new()
-        .max_connections(8)
-        .connect_with(options)
+    if POOL.get().is_some() {
+        return Ok(());
+    }
+    let url = std::env::var("DATABASE_URL")
+        .map_err(|_| "DATABASE_URL is not set (e.g. a Neon/Vercel Postgres connection string)")?;
+    let pool = PgPoolOptions::new()
+        .max_connections(4)
+        .connect(&url)
         .await?;
     sqlx::migrate!("./migrations").run(&pool).await?;
     seed(&pool).await?;
@@ -32,21 +32,22 @@ pub async fn init() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
 
 /// On an empty database create the initial approver so the family can log in
 /// and create the rest of the accounts from the UI.
-async fn seed(pool: &SqlitePool) -> Result<(), sqlx::Error> {
+async fn seed(pool: &PgPool) -> Result<(), sqlx::Error> {
     let user_count: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM users")
         .fetch_one(pool)
         .await?;
     if user_count > 0 {
         return Ok(());
     }
-    let email =
-        std::env::var("BALAGER_ADMIN_EMAIL").unwrap_or_else(|_| "admin@balager.hu".to_string());
+    let email = std::env::var("BALAGER_ADMIN_EMAIL")
+        .unwrap_or_else(|_| "admin@balager.hu".to_string())
+        .to_lowercase();
     let password =
         std::env::var("BALAGER_ADMIN_PASSWORD").unwrap_or_else(|_| "balaton26".to_string());
     let hash = super::auth::hash_password(&password);
     sqlx::query(
         "INSERT INTO users (name, email, password_hash, color, role, active, created_at)
-         VALUES (?, ?, ?, '#356b9b', 'approver', 1, ?)",
+         VALUES ($1, $2, $3, '#356b9b', 'approver', 1, $4)",
     )
     .bind("Admin")
     .bind(&email)

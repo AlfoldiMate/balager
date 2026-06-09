@@ -62,7 +62,7 @@ impl DbUser {
 
 pub async fn create_session(user_id: i64) -> Result<String, sqlx::Error> {
     let token = random_token();
-    sqlx::query("INSERT INTO sessions (token, user_id, expires_at) VALUES (?, ?, ?)")
+    sqlx::query("INSERT INTO sessions (token, user_id, expires_at) VALUES ($1, $2, $3)")
         .bind(&token)
         .bind(user_id)
         .bind(now() + SESSION_TTL_SECS)
@@ -71,12 +71,25 @@ pub async fn create_session(user_id: i64) -> Result<String, sqlx::Error> {
     Ok(token)
 }
 
+fn secure_attr() -> &'static str {
+    // On Vercel (and any HTTPS deployment) mark the cookie Secure; plain
+    // localhost development stays on http.
+    if std::env::var("VERCEL").is_ok() || std::env::var("BALAGER_SECURE_COOKIES").is_ok() {
+        "; Secure"
+    } else {
+        ""
+    }
+}
+
 pub fn session_cookie(token: &str) -> String {
-    format!("{SESSION_COOKIE}={token}; Path=/; HttpOnly; SameSite=Lax; Max-Age={SESSION_TTL_SECS}")
+    format!(
+        "{SESSION_COOKIE}={token}; Path=/; HttpOnly; SameSite=Lax; Max-Age={SESSION_TTL_SECS}{}",
+        secure_attr()
+    )
 }
 
 pub fn clear_session_cookie() -> String {
-    format!("{SESSION_COOKIE}=; Path=/; HttpOnly; SameSite=Lax; Max-Age=0")
+    format!("{SESSION_COOKIE}=; Path=/; HttpOnly; SameSite=Lax; Max-Age=0{}", secure_attr())
 }
 
 /// Read the session cookie of the current request.
@@ -103,7 +116,7 @@ pub async fn current_user() -> Option<DbUser> {
     let user: Option<DbUser> = sqlx::query_as(
         "SELECT u.id, u.name, u.email, u.color, u.role, u.active
          FROM sessions s JOIN users u ON u.id = s.user_id
-         WHERE s.token = ? AND s.expires_at > ? AND u.active = 1",
+         WHERE s.token = $1 AND s.expires_at > $2 AND u.active = 1",
     )
     .bind(&token)
     .bind(now())
@@ -120,17 +133,8 @@ pub async fn require_user() -> Result<DbUser, ServerFnError> {
         .ok_or_else(|| ServerFnError::new("Bejelentkezés szükséges."))
 }
 
-/// Guard: logged-in approver.
-pub async fn require_approver() -> Result<DbUser, ServerFnError> {
-    let user = require_user().await?;
-    if user.role != "approver" {
-        return Err(ServerFnError::new("Csak engedélyező végezheti el ezt a műveletet."));
-    }
-    Ok(user)
-}
-
 pub async fn delete_session(token: &str) {
-    let _ = sqlx::query("DELETE FROM sessions WHERE token = ?")
+    let _ = sqlx::query("DELETE FROM sessions WHERE token = $1")
         .bind(token)
         .execute(db())
         .await;

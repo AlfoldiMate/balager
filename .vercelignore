@@ -1,0 +1,6 @@
+target
+design
+docs
+.playwright-mcp
+*.png
+balager.db*

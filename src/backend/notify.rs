@@ -36,7 +36,7 @@ pub async fn notify(user_ids: &[i64], notice: Notice<'_>) {
     for &uid in user_ids {
         if let Err(e) = sqlx::query(
             "INSERT INTO notifications (user_id, icon, tone, text, link_kind, link_id, read, created_at)
-             VALUES (?, ?, ?, ?, ?, ?, 0, ?)",
+             VALUES ($1, $2, $3, $4, $5, $6, 0, $7)",
         )
         .bind(uid)
         .bind(notice.icon)
@@ -52,14 +52,16 @@ pub async fn notify(user_ids: &[i64], notice: Notice<'_>) {
             continue;
         }
         if email_enabled(uid, notice.pref_key).await {
-            send_email(uid, notice.text.clone());
+            // Awaited inline: serverless instances freeze after the response,
+            // so a spawned task would silently never run.
+            send_email(uid, notice.text.clone()).await;
         }
     }
 }
 
 async fn email_enabled(user_id: i64, pref_key: &str) -> bool {
     let row: Option<(i64,)> =
-        sqlx::query_as("SELECT email FROM notif_prefs WHERE user_id = ? AND key = ?")
+        sqlx::query_as("SELECT email FROM notif_prefs WHERE user_id = $1 AND key = $2")
             .bind(user_id)
             .bind(pref_key)
             .fetch_optional(db())
@@ -90,15 +92,15 @@ fn smtp_config() -> Option<SmtpConfig> {
     })
 }
 
-/// Fire-and-forget e-mail. Skipped (with a log line) when SMTP is not configured.
-fn send_email(user_id: i64, text: String) {
+/// Send a notification e-mail. Skipped (with a log line) when SMTP is not configured.
+async fn send_email(user_id: i64, text: String) {
     let Some(cfg) = smtp_config() else {
         tracing::debug!("SMTP not configured; skipping e-mail notification");
         return;
     };
-    tokio::spawn(async move {
+    {
         let address: Option<(String, String)> =
-            sqlx::query_as("SELECT email, name FROM users WHERE id = ? AND active = 1")
+            sqlx::query_as("SELECT email, name FROM users WHERE id = $1 AND active = 1")
                 .bind(user_id)
                 .fetch_optional(db())
                 .await
@@ -144,5 +146,5 @@ fn send_email(user_id: i64, text: String) {
         if let Err(e) = transport.send(message).await {
             tracing::warn!("failed to send notification e-mail: {e}");
         }
-    });
+    }
 }

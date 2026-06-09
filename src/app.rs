@@ -6,10 +6,6 @@ use crate::api;
 use crate::login::LoginScreen;
 use crate::models::UserDto;
 
-static CSS: Asset = asset!("/assets/styles.css");
-static MANIFEST: Asset = asset!("/assets/manifest.json");
-static ICON: Asset = asset!("/assets/icon.png");
-
 /// Handle for re-checking the session (after login/logout).
 #[derive(Clone, Copy)]
 pub struct SessionHandle(pub Resource<Option<UserDto>>);
@@ -24,9 +20,13 @@ pub fn App() -> Element {
         document::Meta { name: "apple-mobile-web-app-capable", content: "yes" }
         document::Meta { name: "apple-mobile-web-app-status-bar-style", content: "black-translucent" }
         document::Meta { name: "apple-mobile-web-app-title", content: "Balager" }
-        document::Stylesheet { href: CSS }
-        document::Link { rel: "manifest", href: MANIFEST }
-        document::Link { rel: "apple-touch-icon", href: ICON }
+        // Plain static path: asset!() URLs diverge between the dx-built client
+        // and the cargo-built SSR server, so hashed assets cannot be used here.
+        document::Stylesheet { href: "/styles.css" }
+        // Plain static files (copied into public/ by the build scripts);
+        // dx 0.7.3 release builds fail to bundle .json assets via asset!().
+        document::Link { rel: "manifest", href: "/manifest.json" }
+        document::Link { rel: "apple-touch-icon", href: "/icon.png" }
         SessionGate {}
     }
 }

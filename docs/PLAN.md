@@ -7,37 +7,61 @@ login, persistent data, working reservations/tasks/discussions, notifications.
 
 | Layer | Choice | Rationale |
 |---|---|---|
-| Frontend | Dioxus 0.7 (WASM, SSR + hydration) | Spec: Rust + Dioxus |
-| API | Dioxus `#[server]` functions over axum | One codebase, typed end-to-end |
-| Database | SQLite via sqlx (async) | Family-scale data, zero ops; file DB, easy backup |
+| Frontend | Dioxus 0.7 (WASM, client-side rendered) | Spec: Rust + Dioxus |
+| API | Dioxus `#[server]` functions over axum, one Vercel Fluid function | One codebase, typed end-to-end |
+| Database | PostgreSQL via sqlx (Neon / Vercel Postgres) | Serverless has no disk; Neon free tier fits family scale |
 | Auth | email+password, argon2 hashes, DB session token in HttpOnly cookie (180 days) | Spec: login + long-remaining auth |
 | Email | lettre over SMTP, configured via env; silently skipped when unconfigured | Spec: email notifications |
+| Hosting | Vercel: static client on CDN + `@vercel/rust` function for `/api/*` | Spec: Vercel deployment; same binary self-hosts |
 | Styling | The design prototype's CSS ported 1:1 (`assets/styles.css`) | Pixel fidelity to the approved design; Tailwind can be layered in later for new screens |
 
-### Deployment note
+### Deployment
 
-`dx bundle --platform web` produces a single self-contained axum binary +
-static assets. Vercel does not host long-running Rust servers, so the practical
-targets are Fly.io / Hetzner / any VPS / a Raspberry Pi at home. The SQLite
-file lives next to the binary (`DATABASE_URL`, default `sqlite:balager.db`).
+`scripts/vercel-build.sh` compiles the WASM client into `public/` (served by
+the Vercel CDN); `@vercel/rust` compiles `src/main.rs` (bin `main`, default
+features) into a Fluid function answering `/api/*` (`vercel.json` rewrites).
+Locally and self-hosted the very same binary is a normal HTTP server on :3000
+that also serves `./public`. Requires `DATABASE_URL`.
 
-## Module layout
+## Module layout & layering
 
 ```
 src/
-  main.rs          server: dioxus::serve (DB init → router); client: launch
-  app.rs           root: session gate → Login | Shell
+  main.rs          bin "main": Vercel function / local HTTP server; web: launch
   models.rs        shared serde DTOs + Hungarian date/label helpers (chrono)
-  state.rs         UI state + data resources (me, users, reservations, groups, threads, notifs)
-  api/             #[server] functions = the application/domain layer
+  api/             TRANSPORT: #[server] endpoints — authenticate, delegate, map errors
     auth.rs users.rs reservations.rs tasks.rs discussions.rs notifications.rs
-  backend/         server-only (cfg feature = "server")
-    db.rs          pool, migrations (./migrations), first-run seed
-    auth.rs        password hashing, session create/validate, cookie helpers
-    notify.rs      notification fan-out + email sending honoring prefs
-  login.rs shell.rs reservations.rs tasks.rs discussions.rs info.rs
-  notifications.rs settings.rs common.rs icons.rs   (views)
+  domain/          DOMAIN: all business rules, transport-agnostic (server-only)
+    mod.rs         DomainError, Actor, authorization guards
+    users.rs reservations.rs tasks.rs discussions.rs notifications.rs
+  backend/         INFRASTRUCTURE: DB pool/migrations/seed, sessions/passwords,
+    db.rs auth.rs notify.rs        notification fan-out + SMTP delivery
+  app.rs state.rs login.rs shell.rs reservations.rs tasks.rs discussions.rs
+  info.rs notifications.rs settings.rs common.rs icons.rs   (views, web-only)
 ```
+
+The dependency direction is `api → domain → backend`; views talk only to
+`api` stubs and `models`. Authentication (cookie → `Actor`) happens at the
+transport edge; authorization (approver checks, ownership) lives in the domain
+so every caller gets the same rules.
+
+## Extensibility
+
+Adding a feature touches the layers top-down and nothing else:
+
+1. **New rule on an existing operation** — edit the one domain function; every
+   transport (web today, anything tomorrow) picks it up.
+2. **New operation** — add a `domain::<area>` function (rules + notification
+   fan-out), a 5-line `#[server]` endpoint, and the UI that calls it.
+3. **New entity** — migration in `migrations/`, DTO in `models.rs`, domain
+   module, endpoints, view.
+4. **New entry point** — the domain layer has no HTTP types in its signatures
+   (`Actor` + plain data in, `DomainResult` out), so a cron binary for
+   due-date reminders, an admin CLI, or a Telegram bot can call it directly;
+   only session/cookie handling is web-specific.
+5. **Swapping infrastructure** — email delivery is isolated in
+   `backend/notify.rs` (e.g. switch SMTP → Resend API in one file); the DB is
+   plain sqlx/Postgres behind `backend/db.rs`.
 
 ## Domain rules (enforced server-side)
 

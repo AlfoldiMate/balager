@@ -9,9 +9,9 @@ pub async fn login(email: String, password: String) -> Result<UserDto, ServerFnE
     use crate::backend::{auth, db::db};
 
     let user: Option<auth::DbUser> = sqlx::query_as(
-        "SELECT id, name, email, color, role, active FROM users WHERE email = ? AND active = 1",
+        "SELECT id, name, email, color, role, active FROM users WHERE email = $1 AND active = 1",
     )
-    .bind(email.trim())
+    .bind(email.trim().to_lowercase())
     .fetch_optional(db())
     .await
     .map_err(|e| ServerFnError::new(e.to_string()))?;
@@ -19,7 +19,7 @@ pub async fn login(email: String, password: String) -> Result<UserDto, ServerFnE
     let Some(user) = user else {
         return Err(ServerFnError::new("Hibás e-mail cím vagy jelszó."));
     };
-    let hash: String = sqlx::query_scalar("SELECT password_hash FROM users WHERE id = ?")
+    let hash: String = sqlx::query_scalar("SELECT password_hash FROM users WHERE id = $1")
         .bind(user.id)
         .fetch_one(db())
         .await

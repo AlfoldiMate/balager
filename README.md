@@ -69,8 +69,9 @@ todos for our weekend house at Lake Balaton.
 
 ## Technology
 
-- Rust full-stack application: Dioxus 0.7 fullstack (WASM client + axum server)
-- SQLite database (sqlx); file lives next to the binary (`DATABASE_URL`, default `sqlite:balager.db`)
+- Rust full-stack application: Dioxus 0.7 (WASM client, CSR) + axum API of `#[server]` functions
+- PostgreSQL database via sqlx (`DATABASE_URL`; Neon/Vercel Postgres in production)
+- Deployed on **Vercel**: static client on the CDN + one Rust Fluid function (`@vercel/rust`) for the API
 - Login via email and password (argon2), 180-day session cookie
 - Desktop and mobile design, minimal PWA support (for iOS)
 - Email notifications via SMTP (optional, see below)
@@ -80,11 +81,16 @@ See `docs/PLAN.md` for the architecture and domain rules.
 
 ## Development
 
+Local development needs a Postgres database, e.g.:
+
 ```sh
-dx serve            # fullstack dev server (client + server)
+brew install postgresql@17 && brew services start postgresql@17
+createdb balager
+export DATABASE_URL=postgres://$USER@localhost:5432/balager
+./scripts/dev.sh        # builds the client into ./public, serves on :3000
 ```
 
-On first run the database is created and seeded with one approver account:
+On first run the schema is migrated and one approver account is seeded:
 **admin@balager.hu / balaton26** (override via `BALAGER_ADMIN_EMAIL` /
 `BALAGER_ADMIN_PASSWORD`). Log in with it, change the password in Beállítások,
 and create the family's accounts there (users cannot register themselves).
@@ -99,11 +105,19 @@ SMTP_HOST, SMTP_PORT (default 587), SMTP_USERNAME, SMTP_PASSWORD,
 SMTP_FROM (e.g. "Balager <balager@example.hu>"), APP_BASE_URL
 ```
 
-### Deployment
+### Deploying to Vercel
 
-`dx bundle --platform web` produces a self-contained server binary + assets.
-Vercel does not host long-running Rust servers — deploy to Fly.io, a VPS, or a
-home server instead; back up the SQLite file.
+1. Create a Postgres database (Vercel dashboard → Storage → Neon) and note its
+   connection string.
+2. `npm i -g vercel && vercel link` (or import the Git repo in the dashboard).
+3. Set environment variables on the project: `DATABASE_URL` (required),
+   optionally `BALAGER_ADMIN_EMAIL`, `BALAGER_ADMIN_PASSWORD` and the SMTP vars.
+4. `vercel --prod`.
+
+The build runs `scripts/vercel-build.sh` (compiles the WASM client into
+`public/`, served by the CDN); `@vercel/rust` compiles `src/main.rs` into a
+Fluid function that answers `/api/*`. The same binary also works self-hosted:
+`cargo build --release` and run it next to a `public/` directory.
 
 ## Design reference
 

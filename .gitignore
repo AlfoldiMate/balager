@@ -1,0 +1,21 @@
+# Rust
+/target/
+
+# Dioxus
+/dist/
+.dioxus/
+
+# Node / Tailwind tooling
+/node_modules/
+
+# Environment
+.env
+.env.local
+.env.*.local
+
+# Vercel
+.vercel/
+
+# Editor / OS
+.DS_Store
+*.log

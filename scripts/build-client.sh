@@ -5,6 +5,10 @@
 # so deployments use the committed bundle.
 set -euo pipefail
 cd "$(dirname "$0")/.."
+# Server-fn route hashes default to xxh64(CARGO_MANIFEST_DIR + module path),
+# which differs between this machine and Vercel's build dir; a fixed override
+# keeps client and server in agreement. Must match build.env in vercel.json.
+export SERVER_FN_OVERRIDE_KEY=balager
 
 # dx 0.7.3's release asset finalisation is flaky ("Failed to rename output
 # file"); retry, then reconstruct what the rename race lost.

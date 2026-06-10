@@ -1,6 +1,11 @@
 {
   "$schema": "https://openapi.vercel.sh/vercel.json",
   "buildCommand": "bash scripts/vercel-build.sh",
+  "build": {
+    "env": {
+      "SERVER_FN_OVERRIDE_KEY": "balager"
+    }
+  },
   "outputDirectory": "public",
   "functions": {
     "api/main.rs": {

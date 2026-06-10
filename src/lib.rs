@@ -64,27 +64,17 @@ pub async fn server_main() -> Result<(), vercel_runtime::Error> {
     // bundle. Alias any missing main-dxh*.js / main_bg-dxh*.wasm request to
     // the committed loader/wasm (content-identical).
     let assets_dir = format!("{public}/assets");
-    let alias_public = public.clone();
+    let alias_shell = shell.clone();
     let asset_alias = axum::routing::get(move |uri: axum::http::Uri| {
-        let public = alias_public.clone();
+        let shell = alias_shell.clone();
         async move {
             use axum::response::IntoResponse;
             let name = uri.path().trim_start_matches('/').to_string();
             let (path, mime): (Option<std::path::PathBuf>, &str) =
                 if name.starts_with("main-dxh") && name.ends_with(".js") {
-                    (Some(format!("{public}/wasm/main.js").into()), "text/javascript")
+                    (Some(format!("{shell}/loader.js").into()), "text/javascript")
                 } else if name.starts_with("main_bg-dxh") && name.ends_with(".wasm") {
-                    let found = std::fs::read_dir(format!("{public}/assets"))
-                        .ok()
-                        .and_then(|dir| {
-                            dir.flatten().map(|e| e.path()).find(|p| {
-                                p.file_name()
-                                    .and_then(|n| n.to_str())
-                                    .map(|n| n.starts_with("main_bg-dxh") && n.ends_with(".wasm"))
-                                    .unwrap_or(false)
-                            })
-                        });
-                    (found, "application/wasm")
+                    (Some(format!("{shell}/main_bg.wasm").into()), "application/wasm")
                 } else {
                     (None, "")
                 };

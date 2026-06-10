@@ -47,4 +47,9 @@ done
 cp -f assets/manifest.json assets/icon.png public/
 cp -f assets/styles.css public/styles.css
 mv public/index.html shell/index.html
+# Copies for the serverless function (only shell/** is bundled into it):
+# the SSR-injected hashed loader name varies per server build, so the
+# function aliases such requests to these files.
+cp public/wasm/main.js shell/loader.js
+cp public/assets/main_bg-dxh*.wasm shell/main_bg.wasm
 echo "Client bundle ready: public/ (static) + shell/ (SSR shell). Commit both."

@@ -98,21 +98,20 @@ pub async fn server_main() -> Result<(), vercel_runtime::Error> {
         .route_service("/manifest.json", ServeFile::new(format!("{public}/manifest.json")))
         .route_service("/icon.png", ServeFile::new(format!("{public}/icon.png")));
 
-    // Vercel rewrites hand the function the *destination* path (/api/main);
-    // the original path travels in the __orig query parameter (see
-    // vercel.json) and is restored here before routing.
-    fn restore_original_path(mut req: http::Request<axum::body::Body>) -> http::Request<axum::body::Body> {
+    // The rewrite in vercel.json appends ?__orig=$1; with that shape Vercel's
+    // proxy delivers the *original* method, path and query to the function
+    // (verified via runtime logs), so only the marker parameter needs to be
+    // stripped before routing.
+    fn strip_rewrite_marker(mut req: http::Request<axum::body::Body>) -> http::Request<axum::body::Body> {
         let Some(query) = req.uri().query() else { return req };
-        let mut orig: Option<String> = None;
-        let mut rest: Vec<&str> = Vec::new();
-        for pair in query.split('&') {
-            match pair.strip_prefix("__orig=") {
-                Some(v) => orig = Some(v.to_string()),
-                None => rest.push(pair),
-            }
+        if !query.contains("__orig=") {
+            return req;
         }
-        let Some(orig) = orig else { return req };
-        let mut path_and_query = format!("/{}", orig.trim_start_matches('/'));
+        let rest: Vec<&str> = query
+            .split('&')
+            .filter(|kv| !kv.starts_with("__orig="))
+            .collect();
+        let mut path_and_query = req.uri().path().to_string();
         if !rest.is_empty() {
             path_and_query.push('?');
             path_and_query.push_str(&rest.join("&"));
@@ -129,7 +128,7 @@ pub async fn server_main() -> Result<(), vercel_runtime::Error> {
 
     let app = ServiceBuilder::new()
         .layer(VercelLayer::new())
-        .map_request(restore_original_path)
+        .map_request(strip_rewrite_marker)
         .service(router);
     vercel_runtime::run(app).await
 }

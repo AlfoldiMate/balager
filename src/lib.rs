@@ -7,29 +7,33 @@
 //!   static client from ./public).
 //! - `web`: the WASM client (`dx build --platform web --no-default-features
 //!   --features web`), served statically.
+//!
+//! The binary entry lives in `api/main.rs` (Vercel requires custom functions
+//! to be inside the `api/` directory); it delegates to [`server_main`] /
+//! [`client_main`].
 
-mod api;
-mod app;
+pub mod api;
+pub mod app;
 #[cfg(feature = "server")]
-mod backend;
-mod common;
-mod discussions;
+pub mod backend;
+pub mod common;
+pub mod discussions;
 #[cfg(feature = "server")]
-mod domain;
-mod icons;
-mod info;
-mod login;
-mod models;
-mod notifications;
-mod reservations;
-mod settings;
-mod shell;
-mod state;
-mod tasks;
+pub mod domain;
+pub mod icons;
+pub mod info;
+pub mod login;
+pub mod models;
+pub mod notifications;
+pub mod reservations;
+pub mod settings;
+pub mod shell;
+pub mod state;
+pub mod tasks;
 
+/// Entry point of the server: Vercel Fluid function / local HTTP server.
 #[cfg(feature = "server")]
-#[tokio::main]
-async fn main() -> Result<(), vercel_runtime::Error> {
+pub async fn server_main() -> Result<(), vercel_runtime::Error> {
     use dioxus::server::{DioxusRouterExt, FullstackState, ServeConfig};
     use tower::ServiceBuilder;
     use tower_http::services::{ServeDir, ServeFile};
@@ -71,12 +75,8 @@ async fn main() -> Result<(), vercel_runtime::Error> {
     vercel_runtime::run(app).await
 }
 
-#[cfg(all(not(feature = "server"), feature = "web"))]
-fn main() {
+/// Entry point of the WASM client.
+#[cfg(feature = "web")]
+pub fn client_main() {
     dioxus::launch(app::App);
-}
-
-#[cfg(all(not(feature = "server"), not(feature = "web")))]
-fn main() {
-    panic!("build with --features server (API) or --features web (client)");
 }

@@ -5,9 +5,13 @@ edition = "2021"
 
 # The single binary: on Vercel it runs as a Fluid function (via vercel_runtime),
 # locally / self-hosted it is a normal HTTP server serving ./public + the API.
+[lib]
+name = "balager"
+path = "src/lib.rs"
+
 [[bin]]
 name = "main"
-path = "src/main.rs"
+path = "api/main.rs"
 
 [dependencies]
 dioxus = { version = "0.7.3", features = ["fullstack"] }

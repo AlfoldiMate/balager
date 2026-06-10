@@ -115,7 +115,7 @@ SMTP_FROM (e.g. "Balager <balager@example.hu>"), APP_BASE_URL
 4. `vercel --prod`.
 
 The build runs `scripts/vercel-build.sh` (compiles the WASM client into
-`public/`, served by the CDN); `@vercel/rust` compiles `src/main.rs` into a
+`public/`, served by the CDN); `@vercel/rust` compiles `api/main.rs` into a
 Fluid function that answers `/api/*`. The same binary also works self-hosted:
 `cargo build --release` and run it next to a `public/` directory.
 

@@ -18,7 +18,7 @@ login, persistent data, working reservations/tasks/discussions, notifications.
 ### Deployment
 
 `scripts/vercel-build.sh` compiles the WASM client into `public/` (served by
-the Vercel CDN); `@vercel/rust` compiles `src/main.rs` (bin `main`, default
+the Vercel CDN); `@vercel/rust` compiles `api/main.rs` (bin `main`, default
 features) into a Fluid function answering `/api/*` (`vercel.json` rewrites).
 Locally and self-hosted the very same binary is a normal HTTP server on :3000
 that also serves `./public`. Requires `DATABASE_URL`.
@@ -27,7 +27,7 @@ that also serves `./public`. Requires `DATABASE_URL`.
 
 ```
 src/
-  main.rs          bin "main": Vercel function / local HTTP server; web: launch
+  lib.rs           module root; server_main/client_main (bin entry: api/main.rs)
   models.rs        shared serde DTOs + Hungarian date/label helpers (chrono)
   api/             TRANSPORT: #[server] endpoints — authenticate, delegate, map errors
     auth.rs users.rs reservations.rs tasks.rs discussions.rs notifications.rs

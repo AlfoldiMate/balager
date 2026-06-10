@@ -30,3 +30,4 @@ balager.db*
 # Vercel
 /public/
 /shell/
+.vercel

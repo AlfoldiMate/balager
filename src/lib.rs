@@ -98,8 +98,38 @@ pub async fn server_main() -> Result<(), vercel_runtime::Error> {
         .route_service("/manifest.json", ServeFile::new(format!("{public}/manifest.json")))
         .route_service("/icon.png", ServeFile::new(format!("{public}/icon.png")));
 
+    // Vercel rewrites hand the function the *destination* path (/api/main);
+    // the original path travels in the __orig query parameter (see
+    // vercel.json) and is restored here before routing.
+    fn restore_original_path(mut req: http::Request<axum::body::Body>) -> http::Request<axum::body::Body> {
+        let Some(query) = req.uri().query() else { return req };
+        let mut orig: Option<String> = None;
+        let mut rest: Vec<&str> = Vec::new();
+        for pair in query.split('&') {
+            match pair.strip_prefix("__orig=") {
+                Some(v) => orig = Some(v.to_string()),
+                None => rest.push(pair),
+            }
+        }
+        let Some(orig) = orig else { return req };
+        let mut path_and_query = format!("/{}", orig.trim_start_matches('/'));
+        if !rest.is_empty() {
+            path_and_query.push('?');
+            path_and_query.push_str(&rest.join("&"));
+        }
+        let mut parts = req.uri().clone().into_parts();
+        if let Ok(pq) = http::uri::PathAndQuery::try_from(path_and_query) {
+            parts.path_and_query = Some(pq);
+            if let Ok(uri) = http::Uri::from_parts(parts) {
+                *req.uri_mut() = uri;
+            }
+        }
+        req
+    }
+
     let app = ServiceBuilder::new()
         .layer(VercelLayer::new())
+        .map_request(restore_original_path)
         .service(router);
     vercel_runtime::run(app).await
 }

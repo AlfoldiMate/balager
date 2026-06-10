@@ -13,7 +13,6 @@
 .env.local
 .env.*.local
 
-# Vercel
 .vercel/
 
 # Editor / OS
@@ -27,7 +26,4 @@ shot-*.png
 # Local database
 balager.db*
 
-# Vercel
-/public/
-/shell/
 .vercel

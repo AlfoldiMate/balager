@@ -114,10 +114,13 @@ SMTP_FROM (e.g. "Balager <balager@example.hu>"), APP_BASE_URL
    optionally `BALAGER_ADMIN_EMAIL`, `BALAGER_ADMIN_PASSWORD` and the SMTP vars.
 4. `vercel --prod`.
 
-The build runs `scripts/vercel-build.sh` (compiles the WASM client into
-`public/`, served by the CDN); `@vercel/rust` compiles `api/main.rs` into a
-Fluid function that answers `/api/*`. The same binary also works self-hosted:
-`cargo build --release` and run it next to a `public/` directory.
+The WASM client bundle (`public/` + `shell/`) is **prebuilt locally and
+committed** — Vercel's build image cannot run the dioxus CLI (its prebuilt
+binary needs a newer glibc). Whenever client code changes, run
+`./scripts/build-client.sh` and commit the result; the deploy build only
+validates the bundle, and `@vercel/rust` compiles `api/main.rs` into a Fluid
+function that serves SSR and `/api/*`. The same binary also works self-hosted:
+`cargo build --release` and run it next to `public/` and `shell/`.
 
 ## Design reference
 

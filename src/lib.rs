@@ -59,11 +59,50 @@ pub async fn server_main() -> Result<(), vercel_runtime::Error> {
     if std::env::var("DIOXUS_PUBLIC_PATH").is_err() {
         std::env::set_var("DIOXUS_PUBLIC_PATH", &shell);
     }
+    // The SSR head injects a loader <script> whose hashed name is derived
+    // from the *server* build, which differs from the committed client
+    // bundle. Alias any missing main-dxh*.js / main_bg-dxh*.wasm request to
+    // the committed loader/wasm (content-identical).
+    let assets_dir = format!("{public}/assets");
+    let alias_public = public.clone();
+    let asset_alias = axum::routing::get(move |uri: axum::http::Uri| {
+        let public = alias_public.clone();
+        async move {
+            use axum::response::IntoResponse;
+            let name = uri.path().trim_start_matches('/').to_string();
+            let (path, mime): (Option<std::path::PathBuf>, &str) =
+                if name.starts_with("main-dxh") && name.ends_with(".js") {
+                    (Some(format!("{public}/wasm/main.js").into()), "text/javascript")
+                } else if name.starts_with("main_bg-dxh") && name.ends_with(".wasm") {
+                    let found = std::fs::read_dir(format!("{public}/assets"))
+                        .ok()
+                        .and_then(|dir| {
+                            dir.flatten().map(|e| e.path()).find(|p| {
+                                p.file_name()
+                                    .and_then(|n| n.to_str())
+                                    .map(|n| n.starts_with("main_bg-dxh") && n.ends_with(".wasm"))
+                                    .unwrap_or(false)
+                            })
+                        });
+                    (found, "application/wasm")
+                } else {
+                    (None, "")
+                };
+            match path.and_then(|p| std::fs::read(p).ok()) {
+                Some(bytes) => (
+                    [(http::header::CONTENT_TYPE, mime.to_string())],
+                    bytes,
+                )
+                    .into_response(),
+                None => http::StatusCode::NOT_FOUND.into_response(),
+            }
+        }
+    });
     let router = axum::Router::<FullstackState>::new()
         .serve_api_application(ServeConfig::new(), app::App)
         // Static assets for local / self-hosted runs; on Vercel the CDN
         // serves these before the rewrite reaches the function.
-        .nest_service("/assets", ServeDir::new(format!("{public}/assets")))
+        .nest_service("/assets", ServeDir::new(assets_dir).fallback(asset_alias))
         .nest_service("/wasm", ServeDir::new(format!("{public}/wasm")))
         .route_service("/styles.css", ServeFile::new(format!("{public}/styles.css")))
         .route_service("/manifest.json", ServeFile::new(format!("{public}/manifest.json")))
